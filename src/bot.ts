@@ -34,6 +34,14 @@ function payment(id: string): PaymentMethod | undefined { return ({ pay_cash: 'c
 function normalizeReplyId(value: unknown) {
   return String(value ?? '').replace(/^ButtonsV3:\s*/i, '').trim().replace(/\s+/g, ' ');
 }
+
+function buttonReply(message: any) {
+  const nested = message.reply?.buttons_reply ?? message.button_reply ?? message.list_reply ?? message.interactive?.button_reply;
+  return {
+    id: normalizeReplyId(nested?.id ?? message.reply?.id ?? message.interactive?.id),
+    title: String(nested?.title ?? message.reply?.title ?? message.interactive?.title ?? '').trim(),
+  };
+}
 function parseQuantity(value: string) {
   const quantity = Number(value.replace(',', '.').replace(/\s*(g|gramos?|units?|unidades?)\s*$/i, ''));
   return Number.isFinite(quantity) && quantity > 0 ? quantity : undefined;
@@ -44,8 +52,7 @@ export async function handleIncoming(message: any) {
   const chatId = String(message.chat_id ?? message.from ?? '');
   if (message.from_me || !allowedPhones.has(from)) return;
   await ensureUser(from);
-  const reply = normalizeReplyId(message.reply?.buttons_reply?.id ?? message.button_reply?.id ?? message.list_reply?.id);
-  const replyTitle = String(message.reply?.buttons_reply?.title ?? message.button_reply?.title ?? message.list_reply?.title ?? '').trim();
+  const { id: reply, title: replyTitle } = buttonReply(message);
   const text = String(message.text?.body ?? '').trim();
   if (!reply && !text) return showMenu(chatId);
   if (reply === 'menu' || text.toLowerCase() === 'menu') return showMenu(chatId);
