@@ -54,20 +54,28 @@ export async function handleIncoming(message: any) {
   if (reply === 'sale') {
     const products = await listProducts();
     if (!products.length) return sendText(chatId, 'No hay productos activos. Añade productos en la base de datos.');
-    return sendMenu(chatId, 'Elige producto:', products.slice(0, 3).map((p) => ({ type: 'quick_reply' as const, title: p.name.slice(0, 25), id: `sale_product_${p.id}` })));
+    const buttons = products.slice(0, 3).flatMap((p) => p.name.toLowerCase() === 'dry'
+      ? [
+          { type: 'quick_reply' as const, title: 'Dry 5 €/g', id: `sale_product_${p.id}_price_500` },
+          { type: 'quick_reply' as const, title: 'Dry 10 €/g', id: `sale_product_${p.id}_price_1000` },
+        ]
+      : [{ type: 'quick_reply' as const, title: p.name.slice(0, 25), id: `sale_product_${p.id}` }]);
+    return sendMenu(chatId, 'Elige producto y precio:', buttons.slice(0, 3));
   }
   if (reply.startsWith('sale_product_')) {
-    const productId = Number(reply.replace('sale_product_', ''));
+    const match = reply.match(/^sale_product_(\d+)(?:_price_(\d+))?$/);
+    const productId = Number(match?.[1]);
+    const selectedPrice = match?.[2] ? Number(match[2]) : undefined;
     const product = (await listProducts()).find((item) => item.id === productId);
     if (!product) return showMenu(chatId);
-    if (product.name.toLowerCase() === 'dry') {
+    if (product.name.toLowerCase() === 'dry' && selectedPrice === undefined) {
       await setSession(from, 'sale_price', { productId });
       return sendMenu(chatId, 'Elige precio por gramo:', [
         { type: 'quick_reply', title: '5 €/g', id: 'sale_price_500' },
         { type: 'quick_reply', title: '10 €/g', id: 'sale_price_1000' },
       ]);
     }
-    await setSession(from, 'sale_quantity', { productId, unitPriceCents: product.sale_price_cents });
+    await setSession(from, 'sale_quantity', { productId, unitPriceCents: selectedPrice ?? product.sale_price_cents });
     return sendText(chatId, `¿Cuántos gramos de ${product.name} vendiste? Escribe una cantidad, por ejemplo: 2`);
   }
   if (session?.state === 'sale_price' && reply.startsWith('sale_price_')) {
