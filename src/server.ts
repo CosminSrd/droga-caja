@@ -4,7 +4,7 @@ import { config } from './config.js';
 import { handleIncoming, sendDailyCloseRequest } from './bot.js';
 
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.post('/webhook/whapi', async (req, res) => {

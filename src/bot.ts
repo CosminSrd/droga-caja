@@ -26,12 +26,16 @@ async function getSession(phone: string) {
 }
 function payment(id: string): PaymentMethod | undefined { return ({ pay_cash: 'cash', pay_bizum: 'bizum', pay_other: 'other' } as const)[id as 'pay_cash' | 'pay_bizum' | 'pay_other']; }
 
+function normalizeReplyId(value: unknown) {
+  return String(value ?? '').replace(/^ButtonsV3:\s*/i, '').trim();
+}
+
 export async function handleIncoming(message: any) {
   const from = String(message.from ?? '').replace(/\D/g, '');
   const chatId = String(message.chat_id ?? message.from ?? '');
   if (message.from_me || !allowedPhones.has(from)) return;
   await ensureUser(from);
-  const reply = String(message.reply?.buttons_reply?.id ?? message.button_reply?.id ?? message.list_reply?.id ?? '');
+  const reply = normalizeReplyId(message.reply?.buttons_reply?.id ?? message.button_reply?.id ?? message.list_reply?.id);
   const text = String(message.text?.body ?? '').trim();
   if (!reply && !text) return showMenu(chatId);
   if (reply === 'menu' || text.toLowerCase() === 'menu') return showMenu(chatId);
