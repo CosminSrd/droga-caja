@@ -1,12 +1,12 @@
 import { pool } from './db/client.js';
 import { config, allowedPhones } from './config.js';
-import { createExpense, createSale, dailySummary, ensureUser, listProducts, type PaymentMethod } from './db/ledger.js';
+import { addInventory, createExpense, createSale, dailySummary, ensureUser, listProducts, type PaymentMethod } from './db/ledger.js';
 import { sendMenu, sendText } from './whapi.js';
 
 const menuButtons = [
   { type: 'quick_reply' as const, title: 'Nueva venta', id: 'sale' },
   { type: 'quick_reply' as const, title: 'Nuevo gasto', id: 'expense' },
-  { type: 'quick_reply' as const, title: 'Caja / stock', id: 'dashboard' },
+  { type: 'quick_reply' as const, title: 'Añadir inventario', id: 'inventory' },
 ];
 const paymentButtons = [
   { type: 'quick_reply' as const, title: 'Efectivo', id: 'pay_cash' },
@@ -63,6 +63,24 @@ export async function handleIncoming(message: any) {
     await setSession(from, 'expense_amount');
     return sendText(chatId, '🧾 Indica el importe en euros, por ejemplo: 12,50');
   }
+  if (reply === 'inventory') {
+    const products = await listProducts();
+    if (!products.length) return sendText(chatId, 'No hay productos activos. Añade productos en la base de datos.');
+    await setSession(from, 'inventory_quantity');
+    return sendText(chatId, products.map((p) => `${p.id}: ${p.name} — stock ${p.stock}`).join('\n') + '\n\nResponde con ID y cantidad, por ejemplo: 1 10');
+  }
+  if (session?.state === 'inventory_quantity' && text) {
+    const [productId, quantity] = text.split(/\s+/).map(Number);
+    if (!Number.isInteger(productId) || !Number.isFinite(quantity) || quantity <= 0) return sendText(chatId, 'Formato inválido. Usa: ID cantidad');
+    try {
+      const result = await addInventory({ phone: from, productId, quantity });
+      await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
+      return sendText(chatId, `✅ Inventario actualizado: +${result.quantity} unidades.`);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'PRODUCT_NOT_FOUND') return sendText(chatId, 'Producto no encontrado. Usa un ID activo.');
+      throw error;
+    }
+  }
   if (session?.state === 'expense_amount' && text) {
     const amount = Number(text.replace(',', '.'));
     if (!Number.isFinite(amount) || amount <= 0) return sendText(chatId, 'Importe inválido.');
@@ -74,7 +92,7 @@ export async function handleIncoming(message: any) {
     await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
     return sendText(chatId, '✅ Gasto registrado como pendiente de justificante.');
   }
-  if (reply === 'dashboard' || reply === 'daily_summary') {
+  if (reply === 'dashboard' || reply === 'daily_summary' || text.toLowerCase() === 'caja' || text.toLowerCase() === 'resumen') {
     const summary = await dailySummary();
     return sendText(chatId, `📈 Resumen\nVentas: ${(summary.sales / 100).toFixed(2)} €\nGastos: ${(summary.expenses / 100).toFixed(2)} €\nEfectivo: ${(summary.cash_sales / 100).toFixed(2)} €\nBizum: ${(summary.bizum_sales / 100).toFixed(2)} €\nSin justificante: ${summary.missing_receipts}`);
   }

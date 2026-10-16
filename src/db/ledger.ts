@@ -36,6 +36,38 @@ export async function createExpense(phone: string, amountCents: number, payment:
     VALUES ('expense',$1,$2,$3,$4,'missing')`, [phone, amountCents, payment, notes ?? null]);
 }
 
+export async function addInventory(input: { phone: string; productId: number; quantity: number; unitCostCents?: number }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const product = await client.query(
+      `SELECT id, purchase_cost_cents FROM products WHERE id=$1 AND active=true FOR UPDATE`,
+      [input.productId],
+    );
+    if (!product.rowCount) throw new Error('PRODUCT_NOT_FOUND');
+    const unitCost = input.unitCostCents ?? Number(product.rows[0].purchase_cost_cents);
+    const amount = Math.round(unitCost * input.quantity);
+    const entry = await client.query(
+      `INSERT INTO ledger_entries(kind,user_phone,amount_cents,payment_method,receipt_status,notes)
+       VALUES ('purchase',$1,$2,'other','missing','Entrada de inventario') RETURNING id`,
+      [input.phone, amount],
+    );
+    await client.query(
+      `INSERT INTO ledger_lines(ledger_entry_id,product_id,quantity,unit_price_cents)
+       VALUES ($1,$2,$3,$4)`,
+      [entry.rows[0].id, input.productId, input.quantity, unitCost],
+    );
+    await client.query('UPDATE products SET stock=stock+$1 WHERE id=$2', [input.quantity, input.productId]);
+    await client.query('COMMIT');
+    return { id: entry.rows[0].id, amount, quantity: input.quantity };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function dailySummary(date = new Date()) {
   const day = date.toISOString().slice(0, 10);
   const { rows } = await pool.query(`SELECT
