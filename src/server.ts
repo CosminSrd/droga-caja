@@ -10,6 +10,13 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 app.post('/webhook/whapi', async (req, res) => {
   res.status(200).json({ ok: true });
   try {
+    console.log('Webhook messages:', (req.body.messages ?? []).map((message: any) => ({
+      type: message.type,
+      from: message.from,
+      chatId: message.chat_id,
+      reply: message.reply,
+      text: message.text,
+    })));
     for (const message of req.body.messages ?? []) await handleIncoming(message);
   } catch (error) {
     console.error('Webhook processing error:', error);

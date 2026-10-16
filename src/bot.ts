@@ -32,7 +32,7 @@ async function getSession(phone: string) {
 function payment(id: string): PaymentMethod | undefined { return ({ pay_cash: 'cash', pay_bizum: 'bizum', pay_other: 'other' } as const)[id as 'pay_cash' | 'pay_bizum' | 'pay_other']; }
 
 function normalizeReplyId(value: unknown) {
-  return String(value ?? '').replace(/^ButtonsV3:\s*/i, '').trim();
+  return String(value ?? '').replace(/^ButtonsV3:\s*/i, '').trim().replace(/\s+/g, ' ');
 }
 function parseQuantity(value: string) {
   const quantity = Number(value.replace(',', '.').replace(/\s*(g|gramos?|units?|unidades?)\s*$/i, ''));
@@ -45,13 +45,14 @@ export async function handleIncoming(message: any) {
   if (message.from_me || !allowedPhones.has(from)) return;
   await ensureUser(from);
   const reply = normalizeReplyId(message.reply?.buttons_reply?.id ?? message.button_reply?.id ?? message.list_reply?.id);
+  const replyTitle = String(message.reply?.buttons_reply?.title ?? message.button_reply?.title ?? message.list_reply?.title ?? '').trim();
   const text = String(message.text?.body ?? '').trim();
   if (!reply && !text) return showMenu(chatId);
   if (reply === 'menu' || text.toLowerCase() === 'menu') return showMenu(chatId);
 
   const session = await getSession(from);
   if (reply === 'more') return sendMenu(chatId, 'Más opciones:', moreButtons);
-  if (reply === 'sale') {
+  if (reply === 'sale' || replyTitle.toLowerCase() === 'nueva venta') {
     const products = await listProducts();
     if (!products.length) return sendText(chatId, 'No hay productos activos. Añade productos en la base de datos.');
     const buttons = products.slice(0, 3).flatMap((p) => p.name.toLowerCase() === 'dry'
@@ -62,8 +63,17 @@ export async function handleIncoming(message: any) {
       : [{ type: 'quick_reply' as const, title: p.name.slice(0, 25), id: `sale_product_${p.id}` }]);
     return sendMenu(chatId, 'Elige producto y precio:', buttons.slice(0, 3));
   }
-  if (reply.startsWith('sale_product_')) {
-    const match = reply.match(/^sale_product_(\d+)(?:_price_(\d+))?$/);
+  let saleReply = reply;
+  if (!saleReply.startsWith('sale_product_') && /^dry\s*5\s*€/i.test(replyTitle)) {
+    const dry = (await listProducts()).find((item) => item.name.toLowerCase() === 'dry');
+    if (dry) saleReply = `sale_product_${dry.id}_price_500`;
+  }
+  if (!saleReply.startsWith('sale_product_') && /^dry\s*10\s*€/i.test(replyTitle)) {
+    const dry = (await listProducts()).find((item) => item.name.toLowerCase() === 'dry');
+    if (dry) saleReply = `sale_product_${dry.id}_price_1000`;
+  }
+  if (saleReply.startsWith('sale_product_')) {
+    const match = saleReply.match(/^sale_product_(\d+)(?:_price_(\d+))?$/);
     const productId = Number(match?.[1]);
     const selectedPrice = match?.[2] ? Number(match[2]) : undefined;
     const product = (await listProducts()).find((item) => item.id === productId);
