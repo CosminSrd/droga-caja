@@ -12,19 +12,20 @@ export async function listProducts() {
   return rows as { id: number; name: string; unit: string; sale_price_cents: number; stock: string }[];
 }
 
-export async function createSale(input: { phone: string; productId: number; quantity: number; payment: PaymentMethod; clientName?: string; clientContact?: string }) {
+export async function createSale(input: { phone: string; productId: number; quantity: number; payment: PaymentMethod; unitPriceCents?: number; clientName?: string; clientContact?: string }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const product = await client.query(`SELECT id, sale_price_cents, stock FROM products WHERE id=$1 AND active=true FOR UPDATE`, [input.productId]);
     if (!product.rowCount || Number(product.rows[0].stock) < input.quantity) throw new Error('STOCK_INSUFFICIENT');
-    const amount = Math.round(Number(product.rows[0].sale_price_cents) * input.quantity);
+    const unitPriceCents = input.unitPriceCents ?? Number(product.rows[0].sale_price_cents);
+    const amount = Math.round(unitPriceCents * input.quantity);
     const entry = await client.query(`INSERT INTO ledger_entries
       (kind,user_phone,amount_cents,payment_method,client_name,client_contact,receipt_status)
       VALUES ('sale',$1,$2,$3,$4,$5,'not_applicable') RETURNING id`,
       [input.phone, amount, input.payment, input.clientName ?? null, input.clientContact ?? null]);
     await client.query(`INSERT INTO ledger_lines(ledger_entry_id,product_id,quantity,unit_price_cents)
-      VALUES ($1,$2,$3,$4)`, [entry.rows[0].id, input.productId, input.quantity, product.rows[0].sale_price_cents]);
+      VALUES ($1,$2,$3,$4)`, [entry.rows[0].id, input.productId, input.quantity, unitPriceCents]);
     await client.query('UPDATE products SET stock=stock-$1 WHERE id=$2', [input.quantity, input.productId]);
     await client.query('COMMIT');
     return { id: entry.rows[0].id, amount };

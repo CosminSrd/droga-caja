@@ -6,7 +6,12 @@ import { sendMenu, sendText } from './whapi.js';
 const menuButtons = [
   { type: 'quick_reply' as const, title: 'Nueva venta', id: 'sale' },
   { type: 'quick_reply' as const, title: 'Nuevo gasto', id: 'expense' },
+  { type: 'quick_reply' as const, title: 'Más opciones', id: 'more' },
+];
+const moreButtons = [
   { type: 'quick_reply' as const, title: 'Añadir inventario', id: 'inventory' },
+  { type: 'quick_reply' as const, title: 'Ver resumen', id: 'daily_summary' },
+  { type: 'quick_reply' as const, title: 'Volver', id: 'menu' },
 ];
 const paymentButtons = [
   { type: 'quick_reply' as const, title: 'Efectivo', id: 'pay_cash' },
@@ -29,6 +34,7 @@ function payment(id: string): PaymentMethod | undefined { return ({ pay_cash: 'c
 function normalizeReplyId(value: unknown) {
   return String(value ?? '').replace(/^ButtonsV3:\s*/i, '').trim();
 }
+const quantityButtons = (prefix: string) => [1, 2, 3].map((quantity) => ({ type: 'quick_reply' as const, title: `${quantity} g`, id: `${prefix}_qty_${quantity}` }));
 
 export async function handleIncoming(message: any) {
   const from = String(message.from ?? '').replace(/\D/g, '');
@@ -41,37 +47,57 @@ export async function handleIncoming(message: any) {
   if (reply === 'menu' || text.toLowerCase() === 'menu') return showMenu(chatId);
 
   const session = await getSession(from);
+  if (reply === 'more') return sendMenu(chatId, 'Más opciones:', moreButtons);
   if (reply === 'sale') {
     const products = await listProducts();
     if (!products.length) return sendText(chatId, 'No hay productos activos. Añade productos en la base de datos.');
-    await setSession(from, 'sale_quantity', { productId: products[0].id });
-    return sendText(chatId, products.map((p) => `${p.id}: ${p.name} — ${p.sale_price_cents / 100} €/${p.unit} — stock ${p.stock}`).join('\n') + '\n\nResponde con ID y cantidad, por ejemplo: 1 2');
+    return sendMenu(chatId, 'Elige producto:', products.slice(0, 3).map((p) => ({ type: 'quick_reply' as const, title: p.name.slice(0, 25), id: `sale_product_${p.id}` })));
   }
-  if (session?.state === 'sale_quantity' && text) {
-    const [productId, quantity] = text.split(/\s+/).map(Number);
-    if (!Number.isInteger(productId) || !Number.isFinite(quantity) || quantity <= 0) return sendText(chatId, 'Formato inválido. Usa: ID cantidad');
-    await setSession(from, 'sale_payment', { productId, quantity });
+  if (reply.startsWith('sale_product_')) {
+    const productId = Number(reply.replace('sale_product_', ''));
+    const product = (await listProducts()).find((item) => item.id === productId);
+    if (!product) return showMenu(chatId);
+    if (product.name.toLowerCase() === 'dry') {
+      await setSession(from, 'sale_price', { productId });
+      return sendMenu(chatId, 'Elige precio por gramo:', [
+        { type: 'quick_reply', title: '5 €/g', id: 'sale_price_500' },
+        { type: 'quick_reply', title: '10 €/g', id: 'sale_price_1000' },
+      ]);
+    }
+    await setSession(from, 'sale_quantity', { productId, unitPriceCents: product.sale_price_cents });
+    return sendMenu(chatId, 'Elige cantidad:', quantityButtons('sale'));
+  }
+  if (session?.state === 'sale_price' && reply.startsWith('sale_price_')) {
+    await setSession(from, 'sale_quantity', { productId: Number(session.payload.productId), unitPriceCents: Number(reply.replace('sale_price_', '')) });
+    return sendMenu(chatId, 'Elige cantidad:', quantityButtons('sale'));
+  }
+  if (session?.state === 'sale_quantity' && reply.startsWith('sale_qty_')) {
+    await setSession(from, 'sale_payment', { ...session.payload, quantity: Number(reply.replace('sale_qty_', '')) });
     return sendMenu(chatId, 'Forma de pago:', paymentButtons);
   }
   const selectedPayment = payment(reply);
   if (session?.state === 'sale_payment' && selectedPayment) {
-    const result = await createSale({ phone: from, productId: Number(session.payload.productId), quantity: Number(session.payload.quantity), payment: selectedPayment });
+    const result = await createSale({ phone: from, productId: Number(session.payload.productId), quantity: Number(session.payload.quantity), unitPriceCents: Number(session.payload.unitPriceCents), payment: selectedPayment });
     await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
     return sendText(chatId, `✅ Venta registrada: ${(result.amount / 100).toFixed(2)} €`);
   }
   if (reply === 'expense') {
     await setSession(from, 'expense_amount');
-    return sendText(chatId, '🧾 Indica el importe en euros, por ejemplo: 12,50');
+    return sendMenu(chatId, 'Elige importe:', [5, 10, 20].map((amount) => ({ type: 'quick_reply' as const, title: `${amount} €`, id: `expense_amount_${amount}` })));
   }
   if (reply === 'inventory') {
     const products = await listProducts();
     if (!products.length) return sendText(chatId, 'No hay productos activos. Añade productos en la base de datos.');
-    await setSession(from, 'inventory_quantity');
-    return sendText(chatId, products.map((p) => `${p.id}: ${p.name} — stock ${p.stock}`).join('\n') + '\n\nResponde con ID y cantidad, por ejemplo: 1 10');
+    await setSession(from, 'inventory_product');
+    return sendMenu(chatId, 'Elige producto:', products.slice(0, 3).map((p) => ({ type: 'quick_reply' as const, title: p.name.slice(0, 25), id: `inventory_product_${p.id}` })));
   }
-  if (session?.state === 'inventory_quantity' && text) {
-    const [productId, quantity] = text.split(/\s+/).map(Number);
-    if (!Number.isInteger(productId) || !Number.isFinite(quantity) || quantity <= 0) return sendText(chatId, 'Formato inválido. Usa: ID cantidad');
+  if (session?.state === 'inventory_product' && reply.startsWith('inventory_product_')) {
+    await setSession(from, 'inventory_quantity', { productId: Number(reply.replace('inventory_product_', '')) });
+    return sendMenu(chatId, 'Elige cantidad:', quantityButtons('inventory'));
+  }
+  if (session?.state === 'inventory_quantity' && reply.startsWith('inventory_qty_')) {
+    const productId = Number(session.payload.productId);
+    const quantity = Number(reply.replace('inventory_qty_', ''));
     try {
       const result = await addInventory({ phone: from, productId, quantity });
       await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
@@ -81,8 +107,8 @@ export async function handleIncoming(message: any) {
       throw error;
     }
   }
-  if (session?.state === 'expense_amount' && text) {
-    const amount = Number(text.replace(',', '.'));
+  if (session?.state === 'expense_amount' && reply.startsWith('expense_amount_')) {
+    const amount = Number(reply.replace('expense_amount_', ''));
     if (!Number.isFinite(amount) || amount <= 0) return sendText(chatId, 'Importe inválido.');
     await setSession(from, 'expense_payment', { amountCents: Math.round(amount * 100) });
     return sendMenu(chatId, 'Forma de pago:', paymentButtons);
