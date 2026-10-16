@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: droga-caja
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:render
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: WHAPI_TOKEN
+        sync: false
+      - key: WHAPI_WEBHOOK_SECRET
+        sync: false
+      - key: ADMIN_PHONE_1
+        sync: false
+      - key: ADMIN_PHONE_2
+        sync: false
+      - key: WHATSAPP_GROUP_ID
+        sync: false
+      - key: TZ
+        value: Europe/Madrid
