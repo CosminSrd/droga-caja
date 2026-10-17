@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS processed_messages (
+  message_id TEXT PRIMARY KEY,
+  processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS cash_closes (
   close_date DATE PRIMARY KEY,
   expected_cash_cents INTEGER NOT NULL,

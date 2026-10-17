@@ -21,6 +21,7 @@ app.post('/webhook/whapi', async (req, res) => {
     await Promise.all((req.body.messages ?? []).map((message: any) => handleIncoming(message)));
   } catch (error) {
     console.error('Webhook processing error:', error);
+    await import('./whapi.js').then(({ sendText }) => sendText(config.WHATSAPP_GROUP_ID, '⚠️ Error procesando una operación. Revisa el chat privado del socio.').catch(console.error));
   }
 });
 

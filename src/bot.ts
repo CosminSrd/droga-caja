@@ -1,6 +1,6 @@
 import { pool } from './db/client.js';
 import { adminName, config, allowedPhones } from './config.js';
-import { addInventory, createExpense, createSale, dailySummary, ensureUser, listProducts, type PaymentMethod } from './db/ledger.js';
+import { addInventory, claimMessage, createExpense, createProduct, createSale, dailySummary, ensureUser, listProducts, updateProductPrice, type PaymentMethod } from './db/ledger.js';
 import { sendMenu, sendText } from './whapi.js';
 
 const menuButtons = [
@@ -11,7 +11,12 @@ const menuButtons = [
 const moreButtons = [
   { type: 'quick_reply' as const, title: 'Añadir inventario', id: 'inventory' },
   { type: 'quick_reply' as const, title: 'Ver resumen', id: 'daily_summary' },
-  { type: 'quick_reply' as const, title: 'Volver', id: 'menu' },
+  { type: 'quick_reply' as const, title: 'Productos', id: 'products' },
+];
+const productButtons = [
+  { type: 'quick_reply' as const, title: 'Ver stock', id: 'product_stock' },
+  { type: 'quick_reply' as const, title: 'Nuevo producto', id: 'product_new' },
+  { type: 'quick_reply' as const, title: 'Cambiar precio', id: 'product_price' },
 ];
 const paymentButtons = [
   { type: 'quick_reply' as const, title: 'Efectivo', id: 'pay_cash' },
@@ -47,18 +52,61 @@ function parseQuantity(value: string) {
   return Number.isFinite(quantity) && quantity > 0 ? quantity : undefined;
 }
 
+function productStockText(products: Awaited<ReturnType<typeof listProducts>>) {
+  if (!products.length) return 'No hay productos activos.';
+  return `📦 Stock\n${products.map((p) => `${p.name}: ${p.stock} ${p.unit === 'grams' ? 'g' : 'ud'} · ${((Number(p.sale_price_cents) || 0) / 100).toFixed(2)} €/ud`).join('\n')}`;
+}
+
 export async function handleIncoming(message: any) {
   const from = String(message.from ?? '').replace(/\D/g, '');
   const chatId = String(message.chat_id ?? message.from ?? '');
   if (message.from_me || chatId === config.WHATSAPP_GROUP_ID || !allowedPhones.has(from)) return;
+  const messageId = String(message.id ?? '');
+  if (messageId && !(await claimMessage(messageId))) return;
   await ensureUser(from);
   const { id: reply, title: replyTitle } = buttonReply(message);
   const text = String(message.text?.body ?? '').trim();
   if (!reply && !text) return showMenu(chatId);
-  if (reply === 'menu' || text.toLowerCase() === 'menu') return showMenu(chatId);
+  if (reply === 'menu' || text.toLowerCase() === 'menu' || text.toLowerCase() === 'cancelar') {
+    await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
+    return showMenu(chatId);
+  }
 
   const session = await getSession(from);
+  if (session && (await pool.query("DELETE FROM bot_sessions WHERE phone=$1 AND updated_at < now() - interval '30 minutes'", [from])).rowCount) {
+    return sendText(chatId, 'La operación anterior caducó por inactividad. He vuelto al menú principal.');
+  }
   if (reply === 'more') return sendMenu(chatId, 'Más opciones:', moreButtons);
+  if (reply === 'products') return sendMenu(chatId, 'Gestión de productos:', productButtons);
+  if (reply === 'product_stock' || text.toLowerCase() === 'stock') return sendText(chatId, productStockText(await listProducts()));
+  if (reply === 'product_new') {
+    await setSession(from, 'product_new');
+    return sendText(chatId, 'Nuevo producto. Responde así:\nNombre | gramos o unidades | precio venta € | coste € | stock mínimo\nEjemplo: Dry | gramos | 5 | 0 | 10');
+  }
+  if (reply === 'product_price') {
+    await setSession(from, 'product_price');
+    return sendText(chatId, 'Cambio de precio. Responde así:\nID | nuevo precio €\nEjemplo: 2 | 5');
+  }
+  if (session?.state === 'product_new' && text) {
+    const [name, unit, price, cost = '0', minimum = '0'] = text.split('|').map((value) => value.trim());
+    const salePriceCents = Math.round(Number(price.replace(',', '.')) * 100);
+    const purchaseCostCents = Math.round(Number(cost.replace(',', '.')) * 100);
+    const minimumStock = Number(minimum.replace(',', '.'));
+    if (!name || !['gramos', 'unidades'].includes(unit) || !Number.isFinite(salePriceCents) || salePriceCents < 0 || !Number.isFinite(purchaseCostCents) || purchaseCostCents < 0 || !Number.isFinite(minimumStock) || minimumStock < 0) {
+      return sendText(chatId, 'Formato inválido. Usa: Nombre | gramos o unidades | precio venta € | coste € | stock mínimo');
+    }
+    const product = await createProduct({ name, unit: unit === 'gramos' ? 'grams' : 'units', salePriceCents, purchaseCostCents, minimumStock });
+    await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
+    return sendText(chatId, `✅ Producto creado: ${product.name} (ID ${product.id})`);
+  }
+  if (session?.state === 'product_price' && text) {
+    const [idText, priceText] = text.split('|').map((value) => value.trim());
+    const id = Number(idText);
+    const price = Number(priceText?.replace(',', '.'));
+    if (!Number.isInteger(id) || !Number.isFinite(price) || price < 0 || !(await updateProductPrice(id, Math.round(price * 100)))) return sendText(chatId, 'No pude cambiar el precio. Revisa el ID y el importe.');
+    await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
+    return sendText(chatId, `✅ Precio del producto ${id} actualizado a ${price.toFixed(2)} €.`);
+  }
   if (reply === 'sale' || replyTitle.toLowerCase() === 'nueva venta') {
     const products = await listProducts();
     if (!products.length) return sendText(chatId, 'No hay productos activos. Añade productos en la base de datos.');
@@ -120,6 +168,7 @@ export async function handleIncoming(message: any) {
       return;
     } catch (error) {
       if (error instanceof Error && error.message === 'STOCK_INSUFFICIENT') {
+        sendText(config.WHATSAPP_GROUP_ID, `⚠️ Venta no registrada\nSocio: ${adminName(from)}\nMotivo: stock insuficiente.`).catch(console.error);
         return sendText(chatId, 'No hay stock suficiente para registrar esa venta. Añade inventario y vuelve a intentarlo.');
       }
       throw error;
@@ -165,7 +214,7 @@ export async function handleIncoming(message: any) {
   }
   if (reply === 'dashboard' || reply === 'daily_summary' || text.toLowerCase() === 'caja' || text.toLowerCase() === 'resumen') {
     const summary = await dailySummary();
-    return sendText(chatId, `📈 Resumen\nVentas: ${(summary.sales / 100).toFixed(2)} €\nGastos: ${(summary.expenses / 100).toFixed(2)} €\nEfectivo: ${(summary.cash_sales / 100).toFixed(2)} €\nBizum: ${(summary.bizum_sales / 100).toFixed(2)} €\nSin justificante: ${summary.missing_receipts}`);
+    return sendText(chatId, `📈 Resumen del día\n\nVentas: ${summary.sale_count} · ${(summary.sales / 100).toFixed(2)} €\nEfectivo: ${(summary.cash_sales / 100).toFixed(2)} €\nBizum: ${(summary.bizum_sales / 100).toFixed(2)} €\nOtro: ${(summary.other_sales / 100).toFixed(2)} €\n\nGastos: ${(summary.expenses / 100).toFixed(2)} €\nBalance: ${((summary.sales - summary.expenses) / 100).toFixed(2)} €\nSin justificante: ${summary.missing_receipts}`);
   }
   return showMenu(chatId);
 }

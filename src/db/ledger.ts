@@ -6,10 +6,32 @@ export async function ensureUser(phone: string) {
   await pool.query('INSERT INTO users(phone) VALUES ($1) ON CONFLICT (phone) DO UPDATE SET active=true', [phone]);
 }
 
+export async function claimMessage(messageId: string) {
+  const result = await pool.query(
+    'INSERT INTO processed_messages(message_id) VALUES ($1) ON CONFLICT DO NOTHING',
+    [messageId],
+  );
+  return result.rowCount === 1;
+}
+
 export async function listProducts() {
-  const { rows } = await pool.query(`SELECT id, name, unit, sale_price_cents, stock
+  const { rows } = await pool.query(`SELECT id, name, unit, sale_price_cents, purchase_cost_cents, stock, minimum_stock
     FROM products WHERE active=true ORDER BY name`);
-  return rows as { id: number; name: string; unit: string; sale_price_cents: number; stock: string }[];
+  return rows as { id: number; name: string; unit: string; sale_price_cents: number; purchase_cost_cents: number; stock: string; minimum_stock: string }[];
+}
+
+export async function createProduct(input: { name: string; unit: 'grams' | 'units'; salePriceCents: number; purchaseCostCents: number; minimumStock: number }) {
+  const { rows } = await pool.query(
+    `INSERT INTO products(name, unit, sale_price_cents, purchase_cost_cents, minimum_stock)
+     VALUES ($1,$2,$3,$4,$5) RETURNING id, name`,
+    [input.name, input.unit, input.salePriceCents, input.purchaseCostCents, input.minimumStock],
+  );
+  return rows[0] as { id: number; name: string };
+}
+
+export async function updateProductPrice(id: number, salePriceCents: number) {
+  const result = await pool.query('UPDATE products SET sale_price_cents=$1 WHERE id=$2 AND active=true', [salePriceCents, id]);
+  return result.rowCount === 1;
 }
 
 export async function createSale(input: { phone: string; productId: number; quantity: number; payment: PaymentMethod; unitPriceCents?: number; clientName?: string; clientContact?: string }) {
@@ -72,10 +94,12 @@ export async function addInventory(input: { phone: string; productId: number; qu
 export async function dailySummary(date = new Date()) {
   const day = date.toISOString().slice(0, 10);
   const { rows } = await pool.query(`SELECT
+    COUNT(*) FILTER (WHERE kind='sale')::int AS sale_count,
     COALESCE(SUM(amount_cents) FILTER (WHERE kind='sale'),0)::int AS sales,
     COALESCE(SUM(amount_cents) FILTER (WHERE kind='expense'),0)::int AS expenses,
     COALESCE(SUM(amount_cents) FILTER (WHERE kind='sale' AND payment_method='cash'),0)::int AS cash_sales,
     COALESCE(SUM(amount_cents) FILTER (WHERE kind='sale' AND payment_method='bizum'),0)::int AS bizum_sales,
+    COALESCE(SUM(amount_cents) FILTER (WHERE kind='sale' AND payment_method='other'),0)::int AS other_sales,
     COUNT(*) FILTER (WHERE receipt_status='missing')::int AS missing_receipts
     FROM ledger_entries WHERE daily_close_date=$1 AND status='confirmed'`, [day]);
   return rows[0];
