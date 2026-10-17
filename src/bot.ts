@@ -83,7 +83,7 @@ export async function handleIncoming(message: any) {
     const match = saleReply.match(/^sale_product_(\d+)(?:_price_(\d+))?$/);
     const productId = Number(match?.[1]);
     const selectedPrice = match?.[2] ? Number(match[2]) : undefined;
-    const product = (await listProducts()).find((item) => item.id === productId);
+    const product = (await listProducts()).find((item) => Number(item.id) === productId);
     if (!product) return showMenu(chatId);
     if (product.name.toLowerCase() === 'dry' && selectedPrice === undefined) {
       await setSession(from, 'sale_price', { productId });

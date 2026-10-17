@@ -1,15 +1,29 @@
 import { config } from './config.js';
 
 const API = 'https://gate.whapi.cloud';
+const REQUEST_TIMEOUT_MS = 20_000;
 
 type Button = { type: 'quick_reply'; title: string; id: string };
 
 async function request(path: string, body: unknown) {
-  const response = await fetch(`${API}${path}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${config.WHAPI_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${API}${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.WHAPI_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Whapi request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) throw new Error(`Whapi request failed: ${response.status} ${await response.text()}`);
   return response.json();
 }

@@ -18,7 +18,7 @@ app.post('/webhook/whapi', async (req, res) => {
       interactive: message.interactive,
       text: message.text,
     }))));
-    for (const message of req.body.messages ?? []) await handleIncoming(message);
+    await Promise.all((req.body.messages ?? []).map((message: any) => handleIncoming(message)));
   } catch (error) {
     console.error('Webhook processing error:', error);
   }

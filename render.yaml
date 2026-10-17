@@ -2,7 +2,9 @@ services:
   - type: web
     name: droga-caja
     runtime: node
-    plan: free
+    # Free instances sleep after inactivity, causing cold starts on the next webhook.
+    # Starter keeps this webhook process running continuously.
+    plan: starter
     buildCommand: npm ci && npm run build
     startCommand: npm run start:render
     healthCheckPath: /health
