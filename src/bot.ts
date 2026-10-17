@@ -50,7 +50,7 @@ function parseQuantity(value: string) {
 export async function handleIncoming(message: any) {
   const from = String(message.from ?? '').replace(/\D/g, '');
   const chatId = String(message.chat_id ?? message.from ?? '');
-  if (message.from_me || !allowedPhones.has(from)) return;
+  if (message.from_me || chatId === config.WHATSAPP_GROUP_ID || !allowedPhones.has(from)) return;
   await ensureUser(from);
   const { id: reply, title: replyTitle } = buttonReply(message);
   const text = String(message.text?.body ?? '').trim();
@@ -171,8 +171,5 @@ export async function handleIncoming(message: any) {
 }
 
 export function sendDailyCloseRequest() {
-  return sendMenu(config.WHATSAPP_GROUP_ID, '🌙 Cierre diario\nIntroduce el efectivo contado para calcular el descuadre.', [
-    { type: 'quick_reply', title: 'Introducir efectivo', id: 'cash_count' },
-    { type: 'quick_reply', title: 'Ver resumen', id: 'daily_summary' },
-  ]);
+  return sendText(config.WHATSAPP_GROUP_ID, '🌙 Cierre diario\nIntroduce el efectivo contado para calcular el descuadre.');
 }
