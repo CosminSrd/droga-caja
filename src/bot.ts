@@ -1,5 +1,5 @@
 import { pool } from './db/client.js';
-import { config, allowedPhones } from './config.js';
+import { adminName, config, allowedPhones } from './config.js';
 import { addInventory, createExpense, createSale, dailySummary, ensureUser, listProducts, type PaymentMethod } from './db/ledger.js';
 import { sendMenu, sendText } from './whapi.js';
 
@@ -107,9 +107,23 @@ export async function handleIncoming(message: any) {
   }
   const selectedPayment = payment(reply);
   if (session?.state === 'sale_payment' && selectedPayment) {
-    const result = await createSale({ phone: from, productId: Number(session.payload.productId), quantity: Number(session.payload.quantity), unitPriceCents: Number(session.payload.unitPriceCents), payment: selectedPayment });
-    await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
-    return sendText(chatId, `✅ Venta registrada: ${(result.amount / 100).toFixed(2)} €`);
+    const productId = Number(session.payload.productId);
+    const quantity = Number(session.payload.quantity);
+    const product = (await listProducts()).find((item) => Number(item.id) === productId);
+    try {
+      const result = await createSale({ phone: from, productId, quantity, unitPriceCents: Number(session.payload.unitPriceCents), payment: selectedPayment });
+      await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
+      const privateMessage = `✅ Venta registrada: ${(result.amount / 100).toFixed(2)} €`;
+      const groupMessage = `💰 Venta registrada\nSocio: ${adminName(from)}\nProducto: ${product?.name ?? `#${productId}`}\nCantidad: ${quantity}\nImporte: ${(result.amount / 100).toFixed(2)} €\nPago: ${selectedPayment === 'cash' ? 'Efectivo' : selectedPayment === 'bizum' ? 'Bizum' : 'Otro'}`;
+      await sendText(chatId, privateMessage);
+      sendText(config.WHATSAPP_GROUP_ID, groupMessage).catch((error) => console.error('Group sale notification error:', error));
+      return;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'STOCK_INSUFFICIENT') {
+        return sendText(chatId, 'No hay stock suficiente para registrar esa venta. Añade inventario y vuelve a intentarlo.');
+      }
+      throw error;
+    }
   }
   if (reply === 'expense') {
     await setSession(from, 'expense_amount');
