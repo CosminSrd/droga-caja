@@ -17,6 +17,12 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_grams NUMERIC(12,3);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_units NUMERIC(12,3);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS minimum_stock_grams NUMERIC(12,3) NOT NULL DEFAULT 0;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS minimum_stock_units NUMERIC(12,3) NOT NULL DEFAULT 0;
+UPDATE products SET stock_grams = COALESCE(stock_grams, stock), stock_units = COALESCE(stock_units, stock);
+
 CREATE TABLE IF NOT EXISTS ledger_entries (
   id BIGSERIAL PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('sale','expense','purchase','cash_in','cash_out','adjustment')),
@@ -39,6 +45,16 @@ CREATE TABLE IF NOT EXISTS ledger_lines (
   product_id BIGINT NOT NULL REFERENCES products(id),
   quantity NUMERIC(12,3) NOT NULL CHECK (quantity > 0),
   unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_movements (
+  id BIGSERIAL PRIMARY KEY,
+  product_id BIGINT NOT NULL REFERENCES products(id),
+  user_phone TEXT NOT NULL REFERENCES users(phone),
+  grams NUMERIC(12,3) NOT NULL DEFAULT 0,
+  units NUMERIC(12,3) NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL CHECK (reason IN ('purchase','sale','adjustment')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS bot_sessions (

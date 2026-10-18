@@ -54,7 +54,7 @@ function parseQuantity(value: string) {
 
 function productStockText(products: Awaited<ReturnType<typeof listProducts>>) {
   if (!products.length) return 'No hay productos activos.';
-  return `📦 Stock\n${products.map((p) => `${p.name}: ${p.stock} ${p.unit === 'grams' ? 'g' : 'ud'} · ${((Number(p.sale_price_cents) || 0) / 100).toFixed(2)} €/ud`).join('\n')}`;
+  return `📦 Stock\n${products.map((p) => `${p.name}: ${p.stock_grams} g · ${p.stock_units} chivatos · ${((Number(p.sale_price_cents) || 0) / 100).toFixed(2)} €/ud`).join('\n')}`;
 }
 
 export async function handleIncoming(message: any) {
@@ -186,16 +186,18 @@ export async function handleIncoming(message: any) {
   }
   if (session?.state === 'inventory_product' && reply.startsWith('inventory_product_')) {
     await setSession(from, 'inventory_quantity', { productId: Number(reply.replace('inventory_product_', '')) });
-    return sendText(chatId, '¿Cuánta cantidad entra en inventario? Escribe un número, por ejemplo: 10');
+    return sendText(chatId, 'Indica gramos y chivatos separados por |.\nEjemplo: 20 | 18\nSi son iguales, escribe solo 20.');
   }
   if (session?.state === 'inventory_quantity' && text) {
     const productId = Number(session.payload.productId);
-    const quantity = parseQuantity(text);
-    if (!quantity) return sendText(chatId, 'Cantidad inválida. Escribe solo un número, por ejemplo: 10');
+    const values = text.split('|').map((value) => parseQuantity(value.trim()));
+    const grams = values[0];
+    const units = values.length > 1 ? values[1] : grams;
+    if (!grams || !units) return sendText(chatId, 'Cantidad inválida. Usa: gramos | chivatos. Ejemplo: 20 | 18');
     try {
-      const result = await addInventory({ phone: from, productId, quantity });
+      const result = await addInventory({ phone: from, productId, grams, units });
       await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
-      return sendText(chatId, `✅ Inventario actualizado: +${result.quantity} unidades.`);
+      return sendText(chatId, `✅ Inventario actualizado: +${result.grams} g y +${result.units} chivatos.`);
     } catch (error) {
       if (error instanceof Error && error.message === 'PRODUCT_NOT_FOUND') return sendText(chatId, 'Producto no encontrado. Usa un ID activo.');
       throw error;
@@ -214,7 +216,7 @@ export async function handleIncoming(message: any) {
   }
   if (reply === 'dashboard' || reply === 'daily_summary' || text.toLowerCase() === 'caja' || text.toLowerCase() === 'resumen') {
     const summary = await dailySummary();
-    return sendText(chatId, `📈 Resumen del día\n\nVentas: ${summary.sale_count} · ${(summary.sales / 100).toFixed(2)} €\nEfectivo: ${(summary.cash_sales / 100).toFixed(2)} €\nBizum: ${(summary.bizum_sales / 100).toFixed(2)} €\nOtro: ${(summary.other_sales / 100).toFixed(2)} €\n\nGastos: ${(summary.expenses / 100).toFixed(2)} €\nBalance: ${((summary.sales - summary.expenses) / 100).toFixed(2)} €\nSin justificante: ${summary.missing_receipts}`);
+    return sendText(chatId, `📈 Resumen del día\n\nVentas: ${summary.sale_count} · ${(summary.sales / 100).toFixed(2)} €\nEfectivo: ${(summary.cash_sales / 100).toFixed(2)} €\nBizum: ${(summary.bizum_sales / 100).toFixed(2)} €\nOtro: ${(summary.other_sales / 100).toFixed(2)} €\n\nGastos: ${(summary.expenses / 100).toFixed(2)} €\nCoste estimado: ${(summary.estimated_cost / 100).toFixed(2)} €\nMargen estimado: ${(summary.estimated_margin / 100).toFixed(2)} €\nBalance: ${((summary.sales - summary.expenses) / 100).toFixed(2)} €\nSin justificante: ${summary.missing_receipts}`);
   }
   return showMenu(chatId);
 }
