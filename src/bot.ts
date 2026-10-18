@@ -186,14 +186,14 @@ export async function handleIncoming(message: any) {
   }
   if (session?.state === 'inventory_product' && reply.startsWith('inventory_product_')) {
     await setSession(from, 'inventory_quantity', { productId: Number(reply.replace('inventory_product_', '')) });
-    return sendText(chatId, 'Indica gramos y chivatos separados por |.\nEjemplo: 20 | 18\nSi son iguales, escribe solo 20.');
+    return sendText(chatId, 'Indica gramos y chivatos separados por /.\nEjemplo: 20 / 18\nSi son iguales, escribe solo 20.');
   }
   if (session?.state === 'inventory_quantity' && text) {
     const productId = Number(session.payload.productId);
-    const values = text.split('|').map((value) => parseQuantity(value.trim()));
+    const values = text.split(/[|/]/).map((value) => parseQuantity(value.trim()));
     const grams = values[0];
     const units = values.length > 1 ? values[1] : grams;
-    if (!grams || !units) return sendText(chatId, 'Cantidad inválida. Usa: gramos | chivatos. Ejemplo: 20 | 18');
+    if (!grams || !units) return sendText(chatId, 'Cantidad inválida. Usa: gramos / chivatos. Ejemplo: 20 / 18');
     try {
       const result = await addInventory({ phone: from, productId, grams, units });
       await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
