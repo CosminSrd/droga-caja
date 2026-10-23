@@ -145,7 +145,7 @@ export async function handleIncoming(message: any) {
       description: `${(Number(offer.price_cents) / 100).toFixed(2)} €`,
     })));
   }
-  if (reply.startsWith('offer_')) {
+  if (/^offer_\d+$/.test(reply)) {
     const offerId = Number(reply.replace('offer_', ''));
     const offer = (await listOffers()).find((item) => Number(item.id) === offerId);
     if (!offer) return showMenu(chatId);
