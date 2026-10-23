@@ -45,6 +45,6 @@ export function sendList(to: string, text: string, rows: ListRow[]) {
     to,
     type: 'list',
     body: { text },
-    action: { button: 'Ver opciones', sections: [{ title: 'Ofertas activas', rows: rows.slice(0, 10) }] },
+    action: { list: { label: 'Ver opciones', sections: [{ title: 'Ofertas activas', rows: rows.slice(0, 10).map((row) => ({ id: row.id, title: row.title, description: row.description ?? '' })) }] } },
   });
 }
