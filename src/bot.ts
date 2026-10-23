@@ -9,7 +9,7 @@ const menuButtons = [
 ];
 const moreButtons = [
   { type: 'quick_reply' as const, title: 'Añadir inventario', id: 'inventory' },
-  { type: 'quick_reply' as const, title: 'Ver resumen', id: 'daily_summary' },
+  { type: 'quick_reply' as const, title: 'Ver stock', id: 'product_stock' },
   { type: 'quick_reply' as const, title: 'Productos', id: 'products' },
 ];
 const productButtons = [
@@ -57,7 +57,9 @@ function parseNonNegative(value: string) {
 
 function productStockText(products: Awaited<ReturnType<typeof listProducts>>) {
   if (!products.length) return 'No hay productos activos.';
-  return `📦 Stock\n${products.map((p) => `${p.name}: ${p.stock_grams} g · ${p.stock_units} chivatos · ${((Number(p.sale_price_cents) || 0) / 100).toFixed(2)} €/ud`).join('\n')}`;
+  return `📦 Stock actual\n${products.map((p) => p.unit === 'units'
+    ? `${p.name}: ${p.stock_units} unidades`
+    : `${p.name}: ${p.stock_grams} g`).join('\n')}`;
 }
 
 export async function handleIncoming(message: any) {
