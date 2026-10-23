@@ -36,7 +36,7 @@ async function getSession(phone: string) {
 function payment(id: string): PaymentMethod | undefined { return ({ pay_cash: 'cash', pay_bizum: 'bizum', pay_other: 'other' } as const)[id as 'pay_cash' | 'pay_bizum' | 'pay_other']; }
 
 function normalizeReplyId(value: unknown) {
-  return String(value ?? '').replace(/^ButtonsV3:\s*/i, '').trim().replace(/\s+/g, ' ');
+  return String(value ?? '').replace(/^(?:ButtonsV3|ListV3):\s*/i, '').trim().replace(/\s+/g, ' ');
 }
 
 function buttonReply(message: any) {
