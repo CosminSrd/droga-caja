@@ -4,6 +4,7 @@ const API = 'https://gate.whapi.cloud';
 const REQUEST_TIMEOUT_MS = 20_000;
 
 type Button = { type: 'quick_reply'; title: string; id: string };
+type ListRow = { title: string; id: string; description?: string };
 
 async function request(path: string, body: unknown) {
   const controller = new AbortController();
@@ -37,4 +38,13 @@ export function sendMenu(to: string, text: string, buttons: Button[]) {
 
 export function sendText(to: string, body: string) {
   return request('/messages/text', { to, body });
+}
+
+export function sendList(to: string, text: string, rows: ListRow[]) {
+  return request('/messages/interactive', {
+    to,
+    type: 'list',
+    body: { text },
+    action: { button: 'Ver opciones', sections: [{ title: 'Ofertas activas', rows: rows.slice(0, 10) }] },
+  });
 }

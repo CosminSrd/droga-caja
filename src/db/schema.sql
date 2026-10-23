@@ -21,7 +21,26 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_grams NUMERIC(12,3);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_units NUMERIC(12,3);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS minimum_stock_grams NUMERIC(12,3) NOT NULL DEFAULT 0;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS minimum_stock_units NUMERIC(12,3) NOT NULL DEFAULT 0;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS inventory_type TEXT NOT NULL DEFAULT 'product';
 UPDATE products SET stock_grams = COALESCE(stock_grams, stock), stock_units = COALESCE(stock_units, stock);
+
+CREATE TABLE IF NOT EXISTS sale_offers (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS offer_components (
+  id BIGSERIAL PRIMARY KEY,
+  offer_id BIGINT NOT NULL REFERENCES sale_offers(id) ON DELETE CASCADE,
+  product_id BIGINT NOT NULL REFERENCES products(id),
+  quantity_grams NUMERIC(12,3) NOT NULL DEFAULT 0 CHECK (quantity_grams >= 0),
+  quantity_units NUMERIC(12,3) NOT NULL DEFAULT 0 CHECK (quantity_units >= 0),
+  CHECK (quantity_grams > 0 OR quantity_units > 0),
+  UNIQUE (offer_id, product_id)
+);
 
 CREATE TABLE IF NOT EXISTS ledger_entries (
   id BIGSERIAL PRIMARY KEY,
@@ -39,6 +58,9 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
   voided_at TIMESTAMPTZ
 );
 
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS offer_id BIGINT REFERENCES sale_offers(id);
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS offer_name TEXT;
+
 CREATE TABLE IF NOT EXISTS ledger_lines (
   id BIGSERIAL PRIMARY KEY,
   ledger_entry_id BIGINT NOT NULL REFERENCES ledger_entries(id) ON DELETE CASCADE,
@@ -46,6 +68,10 @@ CREATE TABLE IF NOT EXISTS ledger_lines (
   quantity NUMERIC(12,3) NOT NULL CHECK (quantity > 0),
   unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0)
 );
+
+ALTER TABLE ledger_lines ADD COLUMN IF NOT EXISTS quantity_grams NUMERIC(12,3);
+ALTER TABLE ledger_lines ADD COLUMN IF NOT EXISTS quantity_units NUMERIC(12,3);
+ALTER TABLE ledger_lines ADD COLUMN IF NOT EXISTS unit_cost_cents INTEGER;
 
 CREATE TABLE IF NOT EXISTS inventory_movements (
   id BIGSERIAL PRIMARY KEY,

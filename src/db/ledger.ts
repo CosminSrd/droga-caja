@@ -15,13 +15,36 @@ export async function claimMessage(messageId: string) {
 }
 
 export async function listProducts() {
-  const { rows } = await pool.query(`SELECT id, name, unit, sale_price_cents, purchase_cost_cents, stock,
+  const { rows } = await pool.query(`SELECT id, name, unit, inventory_type, sale_price_cents, purchase_cost_cents, stock,
       COALESCE(stock_grams, stock) AS stock_grams,
       COALESCE(stock_units, stock) AS stock_units,
       COALESCE(minimum_stock_grams, minimum_stock) AS minimum_stock_grams,
       COALESCE(minimum_stock_units, 0) AS minimum_stock_units
     FROM products WHERE active=true ORDER BY name`);
-  return rows as { id: number; name: string; unit: string; sale_price_cents: number; purchase_cost_cents: number; stock: string; stock_grams: string; stock_units: string; minimum_stock: string; minimum_stock_grams: string; minimum_stock_units: string }[];
+  return rows as { id: number; name: string; unit: string; inventory_type: string; sale_price_cents: number; purchase_cost_cents: number; stock: string; stock_grams: string; stock_units: string; minimum_stock: string; minimum_stock_grams: string; minimum_stock_units: string }[];
+}
+
+export async function listOffers() {
+  const { rows } = await pool.query(`SELECT o.id, o.name, o.price_cents,
+      COALESCE(json_agg(json_build_object('product_id', c.product_id, 'product_name', p.name,
+        'grams', c.quantity_grams, 'units', c.quantity_units) ORDER BY c.id) FILTER (WHERE c.id IS NOT NULL), '[]') AS components
+    FROM sale_offers o LEFT JOIN offer_components c ON c.offer_id=o.id LEFT JOIN products p ON p.id=c.product_id
+    WHERE o.active=true GROUP BY o.id ORDER BY o.id`);
+  return rows as { id: number; name: string; price_cents: number; components: { product_id: number; product_name: string; grams: string; units: string }[] }[];
+}
+
+export async function createOffer(input: { name: string; priceCents: number; components: { productId: number; grams: number; units: number }[] }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const offer = await client.query('INSERT INTO sale_offers(name, price_cents) VALUES ($1,$2) RETURNING id, name', [input.name, input.priceCents]);
+    for (const component of input.components) {
+      await client.query(`INSERT INTO offer_components(offer_id, product_id, quantity_grams, quantity_units)
+        VALUES ($1,$2,$3,$4)`, [offer.rows[0].id, component.productId, component.grams, component.units]);
+    }
+    await client.query('COMMIT');
+    return offer.rows[0] as { id: number; name: string };
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export async function createProduct(input: { name: string; unit: 'grams' | 'units'; salePriceCents: number; purchaseCostCents: number; minimumStock: number }) {
@@ -62,9 +85,33 @@ export async function createSale(input: { phone: string; productId: number; quan
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
-export async function createExpense(phone: string, amountCents: number, payment: PaymentMethod, notes?: string) {
-  await pool.query(`INSERT INTO ledger_entries(kind,user_phone,amount_cents,payment_method,notes,receipt_status)
-    VALUES ('expense',$1,$2,$3,$4,'missing')`, [phone, amountCents, payment, notes ?? null]);
+export async function createOfferSale(input: { phone: string; offerId: number; payment: PaymentMethod }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const offer = await client.query(`SELECT id, name, price_cents FROM sale_offers WHERE id=$1 AND active=true FOR UPDATE`, [input.offerId]);
+    if (!offer.rowCount) throw new Error('OFFER_NOT_FOUND');
+    const components = await client.query(`SELECT c.product_id, c.quantity_grams, c.quantity_units, p.name, p.purchase_cost_cents,
+        COALESCE(p.stock_grams, p.stock) AS stock_grams, COALESCE(p.stock_units, p.stock) AS stock_units
+      FROM offer_components c JOIN products p ON p.id=c.product_id
+      WHERE c.offer_id=$1 AND p.active=true FOR UPDATE`, [input.offerId]);
+    if (!components.rowCount) throw new Error('OFFER_EMPTY');
+    for (const component of components.rows) {
+      if ((Number(component.quantity_grams) > 0 && Number(component.quantity_grams) > Number(component.stock_grams)) ||
+        (Number(component.quantity_units) > 0 && Number(component.quantity_units) > Number(component.stock_units))) throw new Error('STOCK_INSUFFICIENT');
+    }
+    const entry = await client.query(`INSERT INTO ledger_entries(kind,user_phone,amount_cents,payment_method,receipt_status,offer_id,offer_name)
+      VALUES ('sale',$1,$2,$3,'not_applicable',$4,$5) RETURNING id`, [input.phone, offer.rows[0].price_cents, input.payment, offer.rows[0].id, offer.rows[0].name]);
+    for (const component of components.rows) {
+      await client.query(`INSERT INTO ledger_lines(ledger_entry_id,product_id,quantity,unit_price_cents,quantity_grams,quantity_units,unit_cost_cents)
+        VALUES ($1,$2,COALESCE(NULLIF($3,0),$4),0,$3,$4,$5)`, [entry.rows[0].id, component.product_id, component.quantity_grams, component.quantity_units, component.purchase_cost_cents]);
+      await client.query(`UPDATE products SET stock=stock-GREATEST($1,$2), stock_grams=COALESCE(stock_grams, stock)-$1,
+        stock_units=COALESCE(stock_units, stock)-$2 WHERE id=$3`, [component.quantity_grams, component.quantity_units, component.product_id]);
+      await client.query(`INSERT INTO inventory_movements(product_id,user_phone,grams,units,reason) VALUES ($1,$2,$3,$4,'sale')`, [component.product_id, input.phone, component.quantity_grams, component.quantity_units]);
+    }
+    await client.query('COMMIT');
+    return { id: entry.rows[0].id, amount: Number(offer.rows[0].price_cents), offerName: offer.rows[0].name };
+  } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
 export async function addInventory(input: { phone: string; productId: number; grams: number; units: number; unitCostCents?: number }) {
