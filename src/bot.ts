@@ -40,7 +40,7 @@ function normalizeReplyId(value: unknown) {
 }
 
 function buttonReply(message: any) {
-  const nested = message.reply?.buttons_reply ?? message.button_reply ?? message.list_reply ?? message.interactive?.button_reply;
+  const nested = message.reply?.buttons_reply ?? message.reply?.list_reply ?? message.button_reply ?? message.list_reply ?? message.interactive?.button_reply;
   return {
     id: normalizeReplyId(nested?.id ?? message.reply?.id ?? message.interactive?.id),
     title: String(nested?.title ?? message.reply?.title ?? message.interactive?.title ?? '').trim(),
