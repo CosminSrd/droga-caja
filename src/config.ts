@@ -5,7 +5,7 @@ const schema = z.object({
   PORT: z.coerce.number().default(3000),
   DATABASE_URL: z.string().min(1),
   WHAPI_TOKEN: z.string().min(1),
-  WHAPI_WEBHOOK_SECRET: z.string().optional(),
+  WHAPI_WEBHOOK_SECRET: z.preprocess((value) => value === '' ? undefined : value, z.string().min(1).optional()),
   ADMIN_PHONE_1: z.string().regex(/^\d+$/),
   ADMIN_PHONE_2: z.string().regex(/^\d+$/),
   ADMIN_NAME_1: z.string().optional(),

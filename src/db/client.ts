@@ -7,7 +7,7 @@ export const pool = new pg.Pool({
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
   maxLifetimeSeconds: 300,
-  ssl: { rejectUnauthorized: false },
+  ssl: { rejectUnauthorized: true },
 });
 
 pool.on('error', (error) => console.error('PostgreSQL idle client error:', error));

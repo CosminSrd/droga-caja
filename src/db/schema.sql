@@ -83,6 +83,9 @@ CREATE TABLE IF NOT EXISTS inventory_movements (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS inventory_movements_product_created_idx ON inventory_movements(product_id, created_at);
+CREATE INDEX IF NOT EXISTS ledger_entries_day_status_idx ON ledger_entries(daily_close_date, status);
+
 CREATE TABLE IF NOT EXISTS bot_sessions (
   phone TEXT PRIMARY KEY REFERENCES users(phone) ON DELETE CASCADE,
   state TEXT NOT NULL,

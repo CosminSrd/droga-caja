@@ -1,6 +1,6 @@
 import { pool } from './db/client.js';
 import { config, allowedPhones } from './config.js';
-import { addInventory, claimMessage, createOffer, createOfferSale, createProduct, dailySummary, ensureUser, listOffers, listProducts, updateProductPrice, type PaymentMethod } from './db/ledger.js';
+import { addInventory, claimMessage, createOffer, createOfferSale, createProduct, dailySummary, ensureUser, listOffers, listProducts, type PaymentMethod } from './db/ledger.js';
 import { sendList, sendMenu, sendText } from './whapi.js';
 
 const menuButtons = [
@@ -88,10 +88,6 @@ export async function handleIncoming(message: any) {
     await setSession(from, 'product_new');
     return sendText(chatId, 'Nuevo producto. Responde así:\nNombre | gramos o unidades | precio venta € | coste € | stock mínimo\nEjemplo: Dry | gramos | 5 | 0 | 10');
   }
-  if (reply === 'product_price') {
-    await setSession(from, 'product_price');
-    return sendText(chatId, 'Cambio de precio. Responde así:\nID | nuevo precio €\nEjemplo: 2 | 5');
-  }
   if (reply === 'offers') {
     return sendMenu(chatId, 'Ofertas activas:', [
       { type: 'quick_reply', title: 'Nueva oferta', id: 'offer_new' },
@@ -130,14 +126,6 @@ export async function handleIncoming(message: any) {
     await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
     return sendText(chatId, `✅ Producto creado: ${product.name} (ID ${product.id})`);
   }
-  if (session?.state === 'product_price' && text) {
-    const [idText, priceText] = text.split('|').map((value) => value.trim());
-    const id = Number(idText);
-    const price = Number(priceText?.replace(',', '.'));
-    if (!Number.isInteger(id) || !Number.isFinite(price) || price < 0 || !(await updateProductPrice(id, Math.round(price * 100)))) return sendText(chatId, 'No pude cambiar el precio. Revisa el ID y el importe.');
-    await pool.query('DELETE FROM bot_sessions WHERE phone=$1', [from]);
-    return sendText(chatId, `✅ Precio del producto ${id} actualizado a ${price.toFixed(2)} €.`);
-  }
   if (reply === 'sale' || replyTitle.toLowerCase() === 'nueva venta') {
     const offers = await listOffers();
     if (!offers.length) return sendText(chatId, 'No hay ofertas activas. Añade una oferta en la base de datos.');
@@ -163,6 +151,7 @@ export async function handleIncoming(message: any) {
       return sendText(chatId, `✅ Venta registrada: ${result.offerName} · ${(result.amount / 100).toFixed(2)} €`);
     } catch (error) {
       if (error instanceof Error && error.message === 'STOCK_INSUFFICIENT') return sendText(chatId, 'No hay stock suficiente para esa oferta. Añade inventario y vuelve a intentarlo.');
+      if (error instanceof Error && (error.message === 'OFFER_INVALID' || error.message === 'OFFER_EMPTY')) return sendText(chatId, 'Esta oferta está mal configurada. Revisa sus artículos antes de venderla.');
       throw error;
     }
   }
@@ -170,7 +159,9 @@ export async function handleIncoming(message: any) {
     const products = await listProducts();
     if (!products.length) return sendText(chatId, 'No hay productos activos. Añade productos en la base de datos.');
     await setSession(from, 'inventory_product');
-    return sendMenu(chatId, 'Elige producto:', products.slice(0, 3).map((p) => ({ type: 'quick_reply' as const, title: p.name.slice(0, 25), id: `inventory_product_${p.id}` })));
+    return sendList(chatId, 'Elige artículo de inventario:', products.slice(0, 10).map((p) => ({
+      title: p.name.slice(0, 24), id: `inventory_product_${p.id}`, description: p.unit === 'units' ? `${p.stock_units} unidades` : `${p.stock_grams} g`,
+    })));
   }
   if (session?.state === 'inventory_product' && reply.startsWith('inventory_product_')) {
     const productId = Number(reply.replace('inventory_product_', ''));
@@ -195,6 +186,7 @@ export async function handleIncoming(message: any) {
         : `✅ Inventario actualizado: +${result.grams} g.`);
     } catch (error) {
       if (error instanceof Error && error.message === 'PRODUCT_NOT_FOUND') return sendText(chatId, 'Producto no encontrado. Usa un ID activo.');
+      if (error instanceof Error && error.message === 'INVALID_INVENTORY_QUANTITY') return sendText(chatId, 'La cantidad no coincide con la unidad de este artículo.');
       throw error;
     }
   }
